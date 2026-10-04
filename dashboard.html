@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crime Report Proximity Search</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    form { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    label { display: grid; gap: .4rem; font-weight: 600; }
+    input { padding: .65rem; font: inherit; }
+    #message { min-height: 1.5rem; margin: 1rem 0; }
+    .error { color: #b42318; } .loading { color: #175cd3; }
+    ul { list-style: none; padding: 0; } li { border-bottom: 1px solid #9995; padding: .85rem 0; }
+    .meta { color: #667085; font-size: .9rem; }
+    @media (max-width: 640px) { form { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Crime Report Proximity Search</h1>
+    <form id="search-form" novalidate>
+      <label>Latitude <input id="lat" name="lat" type="number" step="any" min="-90" max="90" value="0.3476" required></label>
+      <label>Longitude <input id="lng" name="lng" type="number" step="any" min="-180" max="180" value="32.5825" required></label>
+      <label>Radius (km) <input id="radius-km" name="radius_km" type="number" step="any" min="0.001" max="50" value="5" required></label>
+    </form>
+    <p id="message" role="status" aria-live="polite"></p>
+    <ul id="results" aria-live="polite"></ul>
+  </main>
+  <script>
+    (() => {
+      const form = document.querySelector('#search-form');
+      const fields = [...form.querySelectorAll('input')];
+      const message = document.querySelector('#message');
+      const results = document.querySelector('#results');
+      let timer;
+      let controller;
+
+      const setMessage = (text, className = '') => {
+        message.textContent = text;
+        message.className = className;
+      };
+
+      const renderReports = (reports) => {
+        results.replaceChildren();
+        let index = 0;
+        const batchSize = 100;
+
+        const renderBatch = () => {
+          const fragment = document.createDocumentFragment();
+          for (let end = Math.min(index + batchSize, reports.length); index < end; index += 1) {
+            const report = reports[index];
+            const item = document.createElement('li');
+            const title = document.createElement('strong');
+            const details = document.createElement('div');
+            const meta = document.createElement('div');
+            title.textContent = `#${report.id} — ${report.status}`;
+            details.textContent = report.description;
+            meta.className = 'meta';
+            meta.textContent = `${Math.round(Number(report.distance_meters))} m away · ${report.created_at}`;
+            item.append(title, details, meta);
+            fragment.append(item);
+          }
+          results.append(fragment);
+          if (index < reports.length) requestAnimationFrame(renderBatch);
+        };
+        requestAnimationFrame(renderBatch);
+      };
+
+      const search = async () => {
+        const values = Object.fromEntries(new FormData(form));
+        const lat = Number(values.lat);
+        const lng = Number(values.lng);
+        const radius = Number(values.radius_km);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radius) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || radius <= 0 || radius > 50) {
+          results.replaceChildren();
+          setMessage('Enter a latitude (-90 to 90), longitude (-180 to 180), and radius above 0 up to 50 km.', 'error');
+          return;
+        }
+        controller?.abort();
+        controller = new AbortController();
+        results.replaceChildren();
+        setMessage('Loading reports…', 'loading');
+        try {
+          const query = new URLSearchParams(values);
+          const response = await fetch(`api/get_reports.php?${query}`, { signal: controller.signal });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || 'Unable to load reports.');
+          if (payload.reports.length === 0) {
+            setMessage('No reports found in this radius.');
+            return;
+          }
+          setMessage(`Showing ${payload.reports.length} nearest reports (maximum ${payload.limit}).`);
+          renderReports(payload.reports);
+        } catch (error) {
+          if (error.name !== 'AbortError') setMessage(error.message || 'Unable to load reports.', 'error');
+        }
+      };
+
+      fields.forEach((field) => field.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(search, 350);
+      }));
+      search();
+    })();
+  </script>
+</body>
+</html>

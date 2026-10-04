@@ -1,0 +1,8 @@
+.codex/
+.agents/
+logs/*.log
+data/
+DouglasBagambe_TakeHome.zip
+*~
+*.swp
+.DS_Store
